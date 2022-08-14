@@ -107,19 +107,25 @@ def localize_extremum_via_quadratic_fit(i, j, img_i, octave_i, dog_imgs_octave, 
 
     for attempt in range(n_attempts):
         first_img, second_img, third_img = dog_imgs_octave[img_i-1:img_i+2]
+
+        # Neighborhood we are examining for each pixel
         cube = stack([first_img[i-1:i+2, j-1:j+2],
                       second_img[i-1:i+2, j-1:j+2],
                       third_img[i-1:i+2, j-1:j+2]]).astype('float32') / 255.
         
-        # Find gradient to find edges in img
+        # Find gradient and hessian to find corners in the image, these are what we really want :)
+        # Both the gradient and the hessian are approximated using finite difference approximations, making them less expensive to compute. 
+        # It is also due to the fact that we are not dealing with a continuous function here. We are dealing with pixels. This makes h in the formula for finite differences become 1. 
+        # Since we are using second-order finite differences, the formula for the gradient simplifies to:
+        #   (f(x+1) - f(x-1)) / 2
         dx = 0.5 * (cube[1, 1, 2] - cube[1, 1, 0])
         dy = 0.5 * (cube[1, 2, 1] - cube[1, 0, 1])
         ds = 0.5 * (cube[2, 1, 1] - cube[0, 1, 1])
         gradient = np.array([dx, dy, ds])
 
-        # Compute hessian to find corners, these are what we really want :)
         px_val = cube[1, 1, 1]
 
+        # Second-order finite-diff approx for hessian
         dxx = cube[1, 1, 2] - 2 * px_val + cube[1, 1, 0]
         dyy = cube[1, 2, 1] - 2 * px_val + cube[1, 0, 1]
         dss = cube[2, 1, 1] - 2 * px_val + cube[0, 1, 1]
@@ -142,7 +148,7 @@ def localize_extremum_via_quadratic_fit(i, j, img_i, octave_i, dog_imgs_octave, 
         if i < border_w or i >= img_shape[0] - border_w or j < border_w or j >= img_shape[1] - border_w or img_i < 1 or img_i > n_scales_octave:
             return None
     
-    if attempt == n_attempts - 1:
+    if attempt == n_attempts - 1: # We did not converge to below a pixel in set amount of time, discard this extremum
         return None
 
     updated_value = cube[1, 1, 1] + 0.5 * dot(gradient, position_update)
@@ -166,6 +172,7 @@ def compute_keypoints_with_orientations(keypoint, octave_i, gaussian_image, radi
     -   radius_factor: The base-radius of the square that we do computations on
     -   num_bins:      The amount of parts to divide degrees into. We have 10 degrees per bin -> num_bins=36
     -   scale_factor:  The amount we scaled the image for each octave
+    -   weight_factor: Determines how much a pixel's contribution should drop off per unit of distance from the keypoint.
 
     """
     keypoints_with_orientations = []
@@ -187,7 +194,8 @@ def compute_keypoints_with_orientations(keypoint, octave_i, gaussian_image, radi
                     dy = gaussian_image[region_y - 1, region_x] - gaussian_image[region_y + 1, region_x]
                     gradient_magnitude = sqrt(dx * dx + dy * dy)
                     gradient_orientation = rad2deg(arctan2(dy, dx))
-                    weight = exp(weight_factor * (i ** 2 + j ** 2))  # constant in front of exponential can be dropped because we will find peaks later
+
+                    weight = exp(weight_factor * (i ** 2 + j ** 2)) # Give more weight to pixels close to the keypoint being examined
                     histogram_index = int(round(gradient_orientation * num_bins / 360.))
                     raw_histogram[histogram_index % num_bins] += weight * gradient_magnitude
 
@@ -237,7 +245,10 @@ def find_keypoints(gaussian_images, dog_images, border_w=5):
 
     return keypoints
 
-
+"""
+This following section is heavily fetched from https://github.com/rmislam/PythonSIFT/blob/master/pysift.py due to time constraints.
+Yes, I started later than I would like
+"""
 def convert_keypoints_to_input_image_size(keypoints):
     """Convert keypoint point, size, and octave to input image size
     """
@@ -267,7 +278,8 @@ def compare_keypoints(keypoint1, keypoint2):
     return keypoint2.class_id - keypoint1.class_id
 
 def remove_duplicate_keypoints(keypoints):
-    """Sort keypoints and remove duplicate keypoints
+    """
+    Sort keypoints and remove duplicate keypoints
     """
     if len(keypoints) < 2:
         return keypoints
@@ -296,7 +308,8 @@ def unpack_octave(keypoint):
     return octave, layer, scale
 
 def generate_descriptors(keypoints, gaussian_images, window_width=4, num_bins=8, scale_multiplier=3, descriptor_max_value=0.2):
-    """Generate descriptors for each keypoint
+    """
+    Generate descriptors for each keypoint
     """
     descriptors = []
 
@@ -443,7 +456,6 @@ if __name__ == "__main__":
 
 
     kp_main, des_main = get_keypoints_and_descriptors(image_float32)
-    #split_kp_and_des = [get_keypoints_and_descriptors(img) for img in split_images_float32]
 
 
     # Match descriptors and find subimage
@@ -454,7 +466,7 @@ if __name__ == "__main__":
     # FLANN parameters
     FLANN_INDEX_KDTREE = 1
     index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
-    search_params = dict(checks=50)   # or pass empty dictionary
+    search_params = dict(checks=50)
     flann = cv2.FlannBasedMatcher(index_params,search_params)
 
     f = plt.figure(figsize=(25,25))
@@ -499,7 +511,6 @@ if __name__ == "__main__":
                 newimg[hdif:hdif + h1, :w1, j] = sub_images[i]
                 newimg[:h2, w1:w1 + w2, j] = image_main
 
-            # Draw SIFT keypoint matches
             for m in good_matches:
                 pt1 = (int(kp_sub[m.queryIdx].pt[0]), int(kp_sub[m.queryIdx].pt[1] + hdif))
                 pt2 = (int(kp_main[m.trainIdx].pt[0] + w1), int(kp_main[m.trainIdx].pt[1]))
