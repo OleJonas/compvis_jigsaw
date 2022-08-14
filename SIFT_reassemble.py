@@ -153,6 +153,8 @@ def localize_extremum_via_quadratic_fit(i, j, img_i, octave_i, dog_imgs_octave, 
 
     updated_value = cube[1, 1, 1] + 0.5 * dot(gradient, position_update)
     if abs(updated_value) * n_scales_octave >= contrast_threshold:
+        
+        # Compute ratio between eigenvalues of the hessian to find bad keypoints along edges.
         xy_hessian = hessian[:2, :2]
         xy_hessian_trace = trace(xy_hessian)
         xy_hessian_det = det(xy_hessian)
