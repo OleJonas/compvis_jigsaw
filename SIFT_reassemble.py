@@ -1,6 +1,4 @@
 from configparser import Interpolation
-from gettext import find
-from webbrowser import get
 import numpy as np
 import os
 import re
